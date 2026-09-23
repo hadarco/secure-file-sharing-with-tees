@@ -1,0 +1,57 @@
+# Python environments and generated files
+.venv/
+venv/
+g8venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Private deployment configuration
+.env
+.env.*
+!.env.example
+*.local
+
+# Private key material, tokens, and runtime state
+*.key
+*.pem
+*.pfx
+*.p12
+*.jwk
+*.jwt
+*.wrapped
+id_rsa*
+id_ed25519*
+g8state/
+g8tls/
+state/
+runtime/
+
+# Captured output and database exports
+*.log
+*.dump
+*.bak
+*.sqlite*
+*.db
+docs/*timing*.txt
+docs/*test*.txt
+docs/measurements*.txt
+docs/boot*.txt
+
+# Private source documents and raw evidence
+DEMO_EVIDENCE.md
+Secure_File_Sharing_with_Trusted_Execution_Environments.pdf
+TEE_File_Sharing_final_presentation.pptx
+
+# Editor/OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest
+# Used by the deployment-dependent key-access/replay diagnostics.
+azure-keyvault-keys

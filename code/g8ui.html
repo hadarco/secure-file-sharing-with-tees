@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TDX Confidential File Sharing · Confidential File Sharing on Intel TDX</title>
+<style>
+/* ---------------------------------------------------------------------------
+   The page is organised around one idea: the trust boundary.
+   Everything on the left happens inside the TDX trust domain and is legible.
+   Everything on the right is what leaves it, and is rendered as what it is —
+   opaque hex. The seam between them is drawn, labelled, and load-bearing.
+   --------------------------------------------------------------------------- */
+:root{
+  --void:#0B0E13;        /* outside everything */
+  --panel:#141922;
+  --panel-2:#1B222D;
+  --edge:#28313E;
+  --ink:#E6EAF1;
+  --ink-dim:#8A94A6;
+  --ink-faint:#5A6474;
+  --sealed:#3FD3A8;      /* inside the TEE */
+  --exposed:#E0913F;     /* outside, untrusted */
+  --alarm:#E5484D;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--void);color:var(--ink);font-family:var(--ui);
+  font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;
+}
+.eyebrow{
+  font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+  font-weight:600;color:var(--ink-faint);
+}
+code,.mono{font-family:var(--mono);font-size:12px}
+
+/* ---- masthead ---- */
+header{
+  border-bottom:1px solid var(--edge);padding:18px 24px;
+  display:flex;flex-wrap:wrap;gap:18px;align-items:baseline;
+}
+header h1{
+  font-size:17px;font-weight:600;margin:0;letter-spacing:-.01em;
+}
+header h1 span{color:var(--ink-faint);font-weight:400}
+#health{margin-left:auto;display:flex;flex-wrap:wrap;gap:14px;align-items:center}
+.chip{
+  font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:2px;
+  border:1px solid var(--edge);color:var(--ink-dim);white-space:nowrap;
+}
+.chip.on{border-color:var(--sealed);color:var(--sealed)}
+.chip.off{border-color:var(--alarm);color:var(--alarm)}
+
+/* ---- auth ---- */
+#auth{max-width:420px;margin:64px auto;padding:0 24px}
+#auth p{color:var(--ink-dim);margin:0 0 22px}
+.field{display:block;margin-bottom:12px}
+.field span{display:block;margin-bottom:5px;font-size:12px;color:var(--ink-dim)}
+input{
+  width:100%;background:var(--panel);border:1px solid var(--edge);color:var(--ink);
+  padding:9px 11px;border-radius:3px;font-family:var(--ui);font-size:14px;
+}
+input:focus{outline:2px solid var(--sealed);outline-offset:1px;border-color:transparent}
+.row{display:flex;gap:9px;margin-top:16px}
+button{
+  background:var(--panel-2);border:1px solid var(--edge);color:var(--ink);
+  padding:9px 15px;border-radius:3px;cursor:pointer;font-family:var(--ui);font-size:13px;
+}
+button:hover{border-color:var(--ink-faint)}
+button:focus-visible{outline:2px solid var(--sealed);outline-offset:1px}
+button.primary{background:var(--sealed);border-color:var(--sealed);color:#04231B;font-weight:600}
+button.primary:hover{filter:brightness(1.1)}
+button.tiny{padding:3px 8px;font-size:11px}
+button.danger:hover{border-color:var(--alarm);color:var(--alarm)}
+
+/* ---- the boundary ---- */
+main{display:none;grid-template-columns:1fr 1px 1fr;min-height:calc(100vh - 61px)}
+main.live{display:grid}
+.side{padding:22px 24px;min-width:0}
+.seam{
+  background:repeating-linear-gradient(to bottom,var(--edge) 0 6px,transparent 6px 12px);
+  position:relative;
+}
+.seam::after{
+  content:"TRUST BOUNDARY";position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%) rotate(90deg);transform-origin:center;
+  white-space:nowrap;font-size:9px;letter-spacing:.3em;color:var(--ink-faint);
+  background:var(--void);padding:6px 10px;font-weight:600;
+}
+.side-head{margin-bottom:18px}
+.side-head h2{font-size:13px;margin:6px 0 3px;font-weight:600}
+.side-head .sub{font-size:12px;color:var(--ink-faint)}
+.inside .eyebrow{color:var(--sealed)}
+.outside .eyebrow{color:var(--exposed)}
+
+/* ---- drop zone ---- */
+#drop{
+  border:1px dashed var(--edge);border-radius:4px;padding:26px 18px;text-align:center;
+  color:var(--ink-dim);cursor:pointer;transition:.12s;margin-bottom:18px;
+}
+#drop:hover,#drop.hot{border-color:var(--sealed);color:var(--sealed);background:#101C19}
+#drop strong{display:block;color:var(--ink);font-weight:500;margin-bottom:3px}
+#drop small{font-size:11px;color:var(--ink-faint)}
+
+/* ---- file list ---- */
+.file{
+  border:1px solid var(--edge);border-radius:4px;padding:11px 13px;margin-bottom:9px;
+  background:var(--panel);cursor:pointer;
+}
+.file:hover{border-color:var(--ink-faint)}
+.file.sel{border-color:var(--sealed);background:#101C19}
+.file-top{display:flex;gap:10px;align-items:baseline}
+.file-name{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-meta{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-faint);white-space:nowrap}
+.file-acts{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
+.tag{
+  font-size:10px;letter-spacing:.08em;text-transform:uppercase;padding:1px 6px;
+  border-radius:2px;border:1px solid var(--edge);color:var(--ink-faint);
+}
+.tag.shared{border-color:var(--exposed);color:var(--exposed)}
+.inspect{
+  margin-left:auto;align-self:center;font-size:11px;color:var(--ink-faint);
+  letter-spacing:.04em;
+}
+.file.sel .inspect{color:var(--exposed)}
+
+/* ---- outside panel ---- */
+.block{margin-bottom:20px}
+.block h3{
+  font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--ink-dim);margin:0 0 7px;
+}
+.dump{
+  background:#0F131A;border:1px solid var(--edge);border-radius:4px;padding:11px 13px;
+  font-family:var(--mono);font-size:11.5px;line-height:1.75;color:var(--exposed);
+  word-break:break-all;white-space:pre-wrap;
+}
+.dump .k{color:var(--ink-faint)}
+.dump .null{color:var(--ink-faint);font-style:italic}
+.verdict{
+  border-left:2px solid var(--exposed);padding:9px 13px;margin-top:16px;
+  color:var(--ink-dim);font-size:12.5px;background:#15120C;
+}
+.verdict b{color:var(--exposed)}
+.empty{color:var(--ink-faint);font-size:12.5px;padding:14px 0}
+
+/* ---- log ---- */
+#log{
+  position:fixed;right:18px;bottom:18px;width:330px;max-height:38vh;overflow:auto;
+  font-family:var(--mono);font-size:11px;background:var(--panel);
+  border:1px solid var(--edge);border-radius:4px;padding:9px 11px;
+}
+#log div{margin-bottom:3px;color:var(--ink-dim)}
+#log div.ok{color:var(--sealed)}
+#log div.bad{color:var(--alarm)}
+@media (max-width:860px){
+  main.live{grid-template-columns:1fr}
+  .seam{height:1px;background:var(--edge)}
+  .seam::after{transform:translate(-50%,-50%)}
+  #log{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Confidential File Sharing <span>· Intel&nbsp;TDX</span></h1>
+  <div id="health"><span class="chip">checking…</span></div>
+</header>
+
+<section id="auth">
+  <p class="eyebrow">Sign in</p>
+  <p>Files are encrypted inside the trust domain before anything leaves it. The cloud
+     operator stores what you upload and cannot read it.</p>
+  <label class="field"><span>Username</span><input id="u" autocomplete="username"></label>
+  <label class="field"><span>Password</span><input id="p" type="password" autocomplete="current-password"></label>
+  <div class="row">
+    <button class="primary" id="btn-login">Sign in</button>
+    <button id="btn-register">Create account</button>
+  </div>
+  <p class="mono" style="color:var(--ink-faint);margin-top:16px">Passwords need 12+ characters.</p>
+</section>
+
+<main id="app">
+  <div class="side inside">
+    <div class="side-head">
+      <p class="eyebrow">Processed by the TDX service</p>
+      <h2>Your files</h2>
+      <p class="sub">Files are decrypted by the service and delivered to your browser over HTTPS.</p>
+      <button id="btn-signout">Sign out</button>
+    </div>
+    <div id="drop" tabindex="0" role="button" aria-label="Add a file">
+      <strong>Drop a file here</strong>
+      <small>or click to choose one</small>
+      <input type="file" id="picker" hidden>
+    </div>
+    <div id="files"></div>
+  </div>
+
+  <div class="seam" aria-hidden="true"></div>
+
+  <div class="side outside">
+    <div class="side-head">
+      <p class="eyebrow">Outside · untrusted</p>
+      <h2>What the cloud operator holds</h2>
+      <p class="sub">Storage diagnostics retrieved by the service from Azure Blob and PostgreSQL.
+         Click any file on the left to inspect what is stored for it.</p>
+    </div>
+    <div id="operator"><p class="empty">Select a file on the left to see what is stored for it.</p></div>
+  </div>
+</main>
+
+<div id="log" aria-live="polite"></div>
+
+<script>
+'use strict';
+/* Every value that reaches the DOM goes through textContent. Filenames are attacker
+   controlled in the threat model, so building markup by string concatenation would put
+   a scripting hole in the demonstration of a security project. */
+
+var TOKEN = null, FILES = [], SEL = null, KEYPAIR = null, KEYFP = null;
+
+/* ---------- session persistence (D23) ----------
+   The token lives in sessionStorage, NOT in a cookie. That is the whole point:
+   a cookie would be attached by the browser to any cross-site request, which is
+   what makes CSRF possible. sessionStorage is never sent automatically - this
+   code reads it and sets the Authorization header itself - so a forged request
+   from another origin arrives with no credentials at all.
+   sessionStorage rather than localStorage because the session token is valid for
+   30 minutes; surviving a browser restart would buy nothing and leave the token
+   on disk longer than it is useful.                                            */
+var SS_TOKEN = 'g8.token', SS_USER = 'g8.user';
+
+function sessionSave(token, uname){
+  try { sessionStorage.setItem(SS_TOKEN, token); sessionStorage.setItem(SS_USER, uname); }
+  catch (e) { /* private browsing can refuse: degrade to in-memory only */ }
+}
+function sessionClear(){
+  try { sessionStorage.removeItem(SS_TOKEN); sessionStorage.removeItem(SS_USER); } catch (e) {}
+}
+function sessionLoad(){
+  try { return { token: sessionStorage.getItem(SS_TOKEN), user: sessionStorage.getItem(SS_USER) }; }
+  catch (e) { return { token: null, user: null }; }
+}
+
+/* Browser keys sign share, revoke, and delete statements. Enrollment and
+   same-origin code must be trusted. Non-extractable keys can still be used
+   by code running in that origin. Clearing IndexedDB loses the key. */
+
+var DB_NAME = 'g8keys', STORE = 'kp';
+
+function idb(){
+  return new Promise(function(res, rej){
+    var r = indexedDB.open(DB_NAME, 1);
+    r.onupgradeneeded = function(){ r.result.createObjectStore(STORE); };
+    r.onsuccess = function(){ res(r.result); };
+    r.onerror = function(){ rej(r.error); };
+  });
+}
+function idbPut(k, v){
+  return idb().then(function(db){
+    return new Promise(function(res, rej){
+      var t = db.transaction(STORE, 'readwrite');
+      t.objectStore(STORE).put(v, k);
+      t.oncomplete = function(){ res(); };
+      t.onerror = function(){ rej(t.error); };
+    });
+  });
+}
+function idbGet(k){
+  return idb().then(function(db){
+    return new Promise(function(res, rej){
+      var t = db.transaction(STORE, 'readonly');
+      var q = t.objectStore(STORE).get(k);
+      q.onsuccess = function(){ res(q.result || null); };
+      q.onerror = function(){ rej(q.error); };
+    });
+  });
+}
+
+function b64(buf){
+  var b = new Uint8Array(buf), s = '';
+  for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+  return btoa(s);
+}
+
+/* extractable:false -- the private key cannot be exported, by us or by anyone who
+   later injects script into this page. */
+function newKeypair(){
+  return crypto.subtle.generateKey({name:'ECDSA', namedCurve:'P-256'}, false,
+                                   ['sign','verify']);
+}
+
+function exportPub(kp){
+  return crypto.subtle.exportKey('spki', kp.publicKey).then(b64);
+}
+
+/* The canonical form MUST match g8sign.canonical() byte for byte: sorted keys, no
+   whitespace. The server rebuilds these bytes from the values it already knows and
+   compares, so any divergence fails closed rather than silently weakening anything. */
+function statementFor(action, userId, fileId, target, permission){
+  var nonce = b64(crypto.getRandomValues(new Uint8Array(8)))
+                .replace(/[^a-zA-Z0-9]/g, '').slice(0, 12);
+  var obj = {
+    act: action,
+    by: String(userId),
+    fid: String(fileId),
+    n: nonce,
+    p: String(permission || ''),
+    to: String(target || ''),
+    ts: Math.floor(Date.now() / 1000)
+  };
+  /* JSON.stringify with an explicit key order, because the spec does not guarantee
+     insertion order for all key types and the server sorts. */
+  var body = '{"act":' + JSON.stringify(obj.act) +
+             ',"by":' + JSON.stringify(obj.by) +
+             ',"fid":' + JSON.stringify(obj.fid) +
+             ',"n":' + JSON.stringify(obj.n) +
+             ',"p":' + JSON.stringify(obj.p) +
+             ',"to":' + JSON.stringify(obj.to) +
+             ',"ts":' + obj.ts + '}';
+  return new TextEncoder().encode(body);
+}
+
+/* M19: `permission` is now part of the signed statement, so the key order below must
+   stay alphabetical (act, by, fid, n, p, to, ts) to match g8sign.canonical()'s
+   sort_keys=True. If these two ever diverge every signature fails closed -- which is the
+   right failure, but it will look like a broken client, so change them together. */
+function signAction(action, fileId, target, permission){
+  if (!KEYPAIR || !MY_ID) return Promise.resolve(null);
+  var body = statementFor(action, MY_ID, fileId, target, permission);
+  return crypto.subtle.sign({name:'ECDSA', hash:'SHA-256'}, KEYPAIR.privateKey, body)
+    .then(function(sig){
+      /* WebCrypto emits raw r||s (64 bytes for P-256); the server re-encodes to DER. */
+      return {statement: b64(body), signature: b64(sig)};
+    });
+}
+
+var MY_ID = null;
+
+function log(msg, cls){
+  var el = document.getElementById('log');
+  var d = document.createElement('div');
+  if (cls) d.className = cls;
+  d.textContent = new Date().toLocaleTimeString() + '  ' + msg;
+  el.insertBefore(d, el.firstChild);
+  while (el.children.length > 40) el.removeChild(el.lastChild);
+}
+
+/* L25 — every response passes through one place, so an expired or revoked session
+   returns the user to the sign-in form instead of producing a stream of "HTTP 401" lines
+   in the log panel while the page still looks signed in. Tokens last 30 minutes and can
+   now be revoked server-side (M11), so a 401 mid-session is a normal event, not an
+   exceptional one. The check is skipped for /login and /register, where a 401 means bad
+   credentials rather than a dead session. */
+function api(method, path, body, extra){
+  var h = extra || {};
+  if (TOKEN) h['Authorization'] = 'Bearer ' + TOKEN;
+  return fetch(path, {method: method, headers: h, body: body}).then(function(r){
+    var isAuthCall = (path === '/login' || path === '/register');
+    if (r.status === 401 && TOKEN && !isAuthCall){
+      signOut('your session expired or was signed out — please sign in again');
+    }
+    return r;
+  });
+}
+
+function el(tag, cls, text){
+  var n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+/* ---------- health ---------- */
+function health(){
+  fetch('/healthz').then(function(r){ return r.json(); }).then(function(h){
+    var box = document.getElementById('health');
+    box.textContent = '';
+    var a = h.anchor || {}, db = h.external_db || {};
+    [['service keys loaded', h.service_root_loaded],
+     ['keys ' + (h.derived_keys || []).length, (h.derived_keys || []).length === 6],
+     [db.tls || 'db down', !!db.tls],
+     ['anchor ' + (a.status || '?'), !a.stale]
+    ].forEach(function(p){
+      box.appendChild(el('span', 'chip ' + (p[1] ? 'on' : 'off'), p[0]));
+    });
+  }).catch(function(){
+    document.getElementById('health').textContent = 'service unreachable';
+  });
+}
+
+/* ---------- auth ---------- */
+function creds(){
+  return JSON.stringify({
+    username: document.getElementById('u').value.trim(),
+    password: document.getElementById('p').value
+  });
+}
+var JSONH = {'Content-Type': 'application/json'};
+
+document.getElementById('btn-register').onclick = function(){
+  log('generating a P-256 signing key in this browser…');
+  newKeypair().then(function(kp){
+    return exportPub(kp).then(function(pub){
+      var body = JSON.parse(creds());
+      body.pubkey = pub;
+      return api('POST', '/register', JSON.stringify(body), JSONH)
+        .then(function(r){
+          return r.json().then(function(b){
+            if (!r.ok){ log('register: ' + (b.detail || r.status), 'bad'); return; }
+            return idbPut(body.username, kp).then(function(){
+              KEYPAIR = kp;
+              log('account created · signing key stored (private half never leaves ' +
+                  'this browser and cannot be exported)', 'ok');
+              signIn();
+            });
+          });
+        });
+    });
+  }).catch(function(e){ log('key generation failed: ' + e, 'bad'); });
+};
+document.getElementById('btn-login').onclick = signIn;
+/* M11: tell the server first, then clear locally. Without the POST the token stayed
+   valid for the rest of its 30 minutes and "sign out" was purely cosmetic. */
+document.getElementById('btn-signout').onclick = function(){
+  api('POST', '/logout').catch(function(){ /* revoke is best effort */ })
+    .then(function(){ signOut('signed out — this session token is now rejected'); });
+};
+document.getElementById('p').onkeydown = function(e){ if (e.key === 'Enter') signIn(); };
+
+function enterApp(uname){
+  document.getElementById('auth').style.display = 'none';
+  document.getElementById('app').classList.add('live');
+  return api('GET', '/me').then(function(rr){
+    if (!rr.ok) throw new Error('session no longer valid');
+    return rr.json();
+  }).then(function(me){
+    MY_ID = me.user_id;
+    return idbGet(uname);
+  }).then(function(kp){
+    KEYPAIR = kp;
+    if (kp) log('signing key loaded — share, revoke and delete will be signed', 'ok');
+    else log('no signing key in this browser: actions will be recorded unsigned');
+    refresh();
+  });
+}
+
+function signOut(reason){
+  TOKEN = null; KEYPAIR = null; MY_ID = null; FILES = []; SEL = null;
+  sessionClear();
+  document.getElementById('app').classList.remove('live');
+  document.getElementById('auth').style.display = '';
+  if (reason) log(reason);
+}
+
+/* Restore an existing session across a page refresh. The token is only trusted
+   after /me confirms the server still accepts it - an expired or revoked token
+   must drop the user back to the sign-in form rather than into a broken app. */
+function restoreSession(){
+  var saved = sessionLoad();
+  if (!saved.token || !saved.user) return;
+  TOKEN = saved.token;
+  document.getElementById('u').value = saved.user;
+  enterApp(saved.user).then(function(){
+    log('session restored after page reload', 'ok');
+  }).catch(function(){
+    signOut('previous session had expired — please sign in again');
+  });
+}
+
+function signIn(){
+  api('POST', '/login', creds(), JSONH).then(function(r){
+    return r.json().then(function(b){
+      if (!r.ok){ log('sign in: ' + (b.detail || r.status), 'bad'); return; }
+      TOKEN = b.token;
+      var uname = document.getElementById('u').value.trim();
+      sessionSave(b.token, uname);
+      log('signed in · session expires in ' + b.expires_in + 's', 'ok');
+      enterApp(uname);
+    });
+  });
+}
+
+/* ---------- files ---------- */
+function refresh(){
+  api('GET', '/files').then(function(r){ return r.json(); }).then(function(b){
+    FILES = b.files || [];
+    var box = document.getElementById('files');
+    box.textContent = '';
+    if (!FILES.length){
+      box.appendChild(el('p', 'empty', 'No files yet. Drop one above to begin.'));
+      document.getElementById('operator').textContent = '';
+      document.getElementById('operator').appendChild(
+        el('p', 'empty', 'Select a file on the left to see what is stored for it.'));
+      return;
+    }
+    /* Never leave the right-hand panel blank: on a projector an empty half-screen reads
+       as broken rather than as waiting. If nothing is selected, select the newest. */
+    var known = FILES.filter(function(f){ return f.file_id === SEL; }).length;
+    if (!known){ SEL = FILES[0].file_id; operator(SEL); }
+    FILES.forEach(function(f){ box.appendChild(fileCard(f)); });
+  });
+}
+
+function fileCard(f){
+  var card = el('div', 'file' + (SEL === f.file_id ? ' sel' : ''));
+  var top = el('div', 'file-top');
+  top.appendChild(el('span', 'file-name', f.filename));
+  if (!f.owned) top.appendChild(el('span', 'tag shared', 'shared with you'));
+  top.appendChild(el('span', 'file-meta', (f.size_bytes / 1024).toFixed(1) + ' KB'));
+  card.appendChild(top);
+
+  var acts = el('div', 'file-acts');
+  var dl = el('button', 'tiny', 'Download');
+  dl.onclick = function(e){ e.stopPropagation(); download(f); };
+  acts.appendChild(dl);
+
+  if (f.owned){
+    var sh = el('button', 'tiny', 'Share');
+    sh.onclick = function(e){ e.stopPropagation(); share(f); };
+    acts.appendChild(sh);
+    var rv = el('button', 'tiny', 'Revoke');
+    rv.onclick = function(e){ e.stopPropagation(); revoke(f); };
+    acts.appendChild(rv);
+    var dl2 = el('button', 'tiny danger', 'Delete');
+    dl2.onclick = function(e){ e.stopPropagation(); del(f); };
+    acts.appendChild(dl2);
+  }
+  var hint = el('span', 'inspect', SEL === f.file_id ? 'shown opposite →' : 'inspect →');
+  acts.appendChild(hint);
+
+  card.appendChild(acts);
+  card.onclick = function(){ SEL = f.file_id; refresh(); operator(f.file_id); };
+  return card;
+}
+
+/* ---------- upload ---------- */
+var drop = document.getElementById('drop'), picker = document.getElementById('picker');
+drop.onclick = function(){ picker.click(); };
+drop.onkeydown = function(e){ if (e.key === 'Enter' || e.key === ' ') picker.click(); };
+picker.onchange = function(){ if (picker.files[0]) upload(picker.files[0]); };
+['dragenter','dragover'].forEach(function(ev){
+  drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add('hot'); });
+});
+['dragleave','drop'].forEach(function(ev){
+  drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.remove('hot'); });
+});
+drop.addEventListener('drop', function(e){
+  if (e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]);
+});
+
+function upload(file){
+  log('encrypting ' + file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB) in TEE memory…');
+  var t0 = performance.now();
+  api('POST', '/files', file, {
+    'Content-Type': 'application/octet-stream',
+    'X-Filename': encodeURIComponent(file.name)
+  }).then(function(r){
+    return r.json().then(function(b){
+      if (!r.ok){ log('upload: ' + (b.detail || r.status), 'bad'); return; }
+      var ms = (performance.now() - t0).toFixed(0);
+      log('stored as ' + b.total_chunks + ' AES-256-GCM chunk(s) in ' + ms + ' ms', 'ok');
+      SEL = b.file_id;
+      refresh();
+      operator(b.file_id);
+    });
+  });
+}
+
+function download(f){
+  api('GET', '/files/' + f.file_id).then(function(r){
+    if (!r.ok){ log('download refused: HTTP ' + r.status, 'bad'); return; }
+    return r.blob().then(function(blob){
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = f.filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      log('decrypted ' + f.filename + ' inside the TEE and sent it to you', 'ok');
+    });
+  });
+}
+
+function share(f){
+  var who = prompt('Share "' + f.filename + '" with which username?');
+  if (!who) return;
+  var t0 = performance.now();
+  signAction('share', f.file_id, who, 'read').then(function(sig){
+    var body = {username: who, permission: 'read'};
+    if (sig){ body.statement = sig.statement; body.signature = sig.signature; }
+    return api('POST', '/files/' + f.file_id + '/share', JSON.stringify(body), JSONH);
+  })
+  .then(function(r){
+    return r.json().then(function(b){
+      if (!r.ok){ log('share: ' + (b.detail || r.status), 'bad'); return; }
+      log('re-wrapped the key for ' + who + ' in ' + (performance.now() - t0).toFixed(0) +
+          ' ms — the file itself was never touched' +
+          (b.signed ? ' · action signed by you' : ''), 'ok');
+      operator(f.file_id);
+    });
+  });
+}
+
+function revoke(f){
+  api('GET', '/files/' + f.file_id + '/shares').then(function(r){ return r.json(); })
+  .then(function(b){
+    var list = b.shares || [];
+    if (!list.length){ log('nobody else has access to this file'); return; }
+    var who = prompt('Revoke which user?\n\n' +
+      list.map(function(s){ return s.username; }).join('\n'));
+    if (!who) return;
+    var hit = list.filter(function(s){ return s.username === who; })[0];
+    if (!hit){ log('no share for ' + who, 'bad'); return; }
+    signAction('revoke', f.file_id, hit.user_id).then(function(sig){
+      var h = {};
+      if (sig){ h['X-G8-Statement'] = sig.statement; h['X-G8-Signature'] = sig.signature; }
+      return api('DELETE', '/files/' + f.file_id + '/share/' + hit.user_id, null, h);
+    }).then(function(r){
+      if (r.ok){
+        log('revoked ' + who + ' — their wrapped key is gone, effective immediately' +
+            (KEYPAIR ? ' · action signed by you' : ''), 'ok');
+        operator(f.file_id);
+      } else log('revoke failed: HTTP ' + r.status, 'bad');
+    });
+  });
+}
+
+function del(f){
+  if (!confirm('Delete "' + f.filename + '"?')) return;
+  signAction('delete', f.file_id, '').then(function(sig){
+    var h = {};
+    if (sig){ h['X-G8-Statement'] = sig.statement; h['X-G8-Signature'] = sig.signature; }
+    return api('DELETE', '/files/' + f.file_id, null, h);
+  }).then(function(r){
+    if (r.ok){
+      log('deleted ' + f.filename + (KEYPAIR ? ' · action signed by you' : ''), 'ok');
+      if (SEL === f.file_id){ SEL = null; document.getElementById('operator').textContent = ''; }
+      refresh();
+    } else log('delete failed: HTTP ' + r.status, 'bad');
+  });
+}
+
+/* ---------- the other side of the boundary ---------- */
+function hexRows(hex, perRow){
+  var out = [];
+  for (var i = 0; i < hex.length; i += perRow * 2){
+    out.push(hex.slice(i, i + perRow * 2).replace(/(..)/g, '$1 ').trim());
+  }
+  return out.join('\n');
+}
+
+function block(title, node){
+  var b = el('div', 'block');
+  b.appendChild(el('h3', null, title));
+  b.appendChild(node);
+  return b;
+}
+
+function operator(fid){
+  var box = document.getElementById('operator');
+  box.textContent = '';
+  box.appendChild(el('p', 'empty', 'Reading Azure Blob and PostgreSQL directly…'));
+
+  api('GET', '/demo/operator-view/' + fid).then(function(r){ return r.json(); })
+  .then(function(d){
+    box.textContent = '';
+
+    var name = el('div', 'dump');
+    name.appendChild(el('span', 'k', 'blob name  '));
+    name.appendChild(document.createTextNode(d.file_id + '\n'));
+    name.appendChild(el('span', 'k', 'container  '));
+    name.appendChild(document.createTextNode(
+      (d.files_row && d.files_row.blob_path) || 'YOUR_BLOB_CONTAINER'));
+    box.appendChild(block('Object identity', name));
+
+    if (d.blob_head){
+      var pre = el('div', 'dump', hexRows(d.blob_head, 16));
+      box.appendChild(block('First 96 bytes of the stored file', pre));
+    }
+
+    if (d.files_row){
+      var m = el('div', 'dump');
+      m.appendChild(el('span', 'k', 'filename_enc  '));
+      m.appendChild(document.createTextNode(d.files_row.filename_enc + '\n'));
+      m.appendChild(el('span', 'k', 'size_bytes    '));
+      m.appendChild(document.createTextNode(d.files_row.size_bytes + '\n'));
+      m.appendChild(el('span', 'k', 'version       '));
+      m.appendChild(document.createTextNode(d.files_row.version));
+      box.appendChild(block('files row, as stored in PostgreSQL', m));
+    }
+
+    if (d.file_keys_rows && d.file_keys_rows.length){
+      var k = el('div', 'dump');
+      d.file_keys_rows.forEach(function(r, i){
+        if (i) k.appendChild(document.createTextNode('\n\n'));
+        k.appendChild(el('span', 'k', 'user  '));
+        k.appendChild(document.createTextNode(r.user_id + '\n'));
+        k.appendChild(el('span', 'k', 'dek   '));
+        k.appendChild(document.createTextNode(r.wrapped_dek.slice(0, 64) + '…'));
+      });
+      box.appendChild(block(
+        d.file_keys_rows.length + ' wrapped key' +
+        (d.file_keys_rows.length > 1 ? 's — one per authorised user' : ''), k));
+    }
+
+    if (d.audit_rows && d.audit_rows.length){
+      var a = el('div', 'dump');
+      d.audit_rows.forEach(function(r, i){
+        if (i) a.appendChild(document.createTextNode('\n'));
+        a.appendChild(el('span', 'k', 'seq ' + r.seq + '  '));
+        a.appendChild(document.createTextNode('user='));
+        a.appendChild(el('span', 'null', String(r.user_id)));
+        a.appendChild(document.createTextNode(' action=' + r.action + ' file='));
+        a.appendChild(el('span', 'null', String(r.file_id)));
+        a.appendChild(document.createTextNode('\n          ' + (r.detail || '') + '…'));
+      });
+      box.appendChild(block('Recent audit rows', a));
+    }
+
+    var v = el('div', 'verdict');
+    v.appendChild(document.createTextNode('The stored blob contains a 16-byte format header and encrypted chunk records. '));
+    v.appendChild(el('b', null, 'File contents and filenames are encrypted.'));
+    v.appendChild(document.createTextNode(
+      ' Audit actors, actions, subjects, and event details are encrypted' +
+      ' together in each audit payload.'));
+    box.appendChild(v);
+  }).catch(function(){
+    box.textContent = '';
+    box.appendChild(el('p', 'empty', 'Could not read the untrusted stores.'));
+  });
+}
+
+health();
+setInterval(health, 20000);
+restoreSession();
+</script>
+</body>
+</html>

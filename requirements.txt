@@ -1,0 +1,12 @@
+# Direct runtime dependencies; validate resolved versions in the target deployment.
+argon2-cffi
+azure-core
+azure-identity
+azure-keyvault-secrets
+azure-storage-blob
+cryptography
+fastapi
+psycopg[binary]
+pydantic
+starlette
+uvicorn
